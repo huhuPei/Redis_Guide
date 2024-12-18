@@ -116,44 +116,45 @@ eventLoop->timeEventHead = te;
 
 事件处理代码感觉比较绕。
 ```
-if (eventLoop->maxfd != -1 ||
+int aeProcessEvents(aeEventLoop *eventLoop, int flags) {
+    if (eventLoop->maxfd != -1 ||
     ((flags & AE_TIME_EVENTS) && !(flags & AE_DONT_WAIT))) {
-    int j;
-    aeTimeEvent *shortest = NULL;
-    struct timeval tv, *tvp;
+        int j;
+        aeTimeEvent *shortest = NULL;
+        struct timeval tv, *tvp;
 
-    if (flags & AE_TIME_EVENTS && !(flags & AE_DONT_WAIT))
-        // poll 需要等待，找到最近的时间事件
-        shortest = aeSearchNearestTimer(eventLoop);
-    if (shortest) {
-        // 有时间事件，计算 poll 的等待时间
-        ...
-    } else {
-        // poll 不需要等待，等待时间设置为 0
-        if (flags & AE_DONT_WAIT) {
-            tv.tv_sec = tv.tv_usec = 0;
-            tvp = &tv;
+        if (flags & AE_TIME_EVENTS && !(flags & AE_DONT_WAIT))
+            // poll 需要等待，找到最近的时间事件
+            shortest = aeSearchNearestTimer(eventLoop);
+        if (shortest) {
+            // 有时间事件，计算 poll 的等待时间
+            ...
         } else {
-            // poll 需要等待，但是没有时间事件，将阻塞等待
-            tvp = NULL; /* wait forever */
+            // poll 不需要等待，等待时间设置为 0
+            if (flags & AE_DONT_WAIT) {
+                tv.tv_sec = tv.tv_usec = 0;
+                tvp = &tv;
+            } else {
+                // poll 需要等待，但是没有时间事件，将阻塞等待
+                tvp = NULL; /* wait forever */
+            }
+        }
+        // 传入 poll 等待时间
+        numevents = aeApiPoll(eventLoop, tvp);
+        // 处理文件事件
+        for (j = 0; j < numevents; j++) {
+            ...
         }
     }
-    // 传入 poll 等待时间
-    numevents = aeApiPoll(eventLoop, tvp);
-    // 处理文件事件
-    for (j = 0; j < numevents; j++) {
-        ...
-    }
+    // 处理时间事件
+    if (flags & AE_TIME_EVENTS)
+        processed += processTimeEvents(eventLoop);
 }
-// 处理时间时间
-if (flags & AE_TIME_EVENTS)
-    processed += processTimeEvents(eventLoop);
-
 ```
 
-### 性能问题
+### 5. 性能问题
 问题 1：时间事件采用链式存储，每次查找超时事件都需要从头遍历整个链表，效率较低。    
-优化：可以使用具有顺序特性的数据结构，如最小堆，查找效率是 O(1)。
+优化：可以使用具有顺序特性的数据结构，如最小堆，查找效率是 O(1)。   
 
 问题 2：当网络 IO 数量过多时，用单线程来监听所有的 IO 事件，无法处理及时所有请求，会造成较大的响应延迟。   
 优化：可以使用多个多路复用线程一起监听 IO 事件，利用多核CPU的处理能力，提高请求响应的处理速度。    
